@@ -349,47 +349,10 @@ func TestScraper(t *testing.T) {
 	}
 	c := getPachClient(t)
 
-	// Check that scraper pipeline manifest appears in the docs (before we create a new repo or anything)
-	readme, err := ioutil.ReadFile("../../../doc/examples/scraper/README.md")
-	require.NoError(t, err)
-	inputPipelineManifest := `
-{
-  "pipeline": {
-    "name": "scraper”
-  },
-  "transform": {
-    "cmd": [ "wget",
-        "--recursive",
-        "--level", "1",
-        "--accept", "jpg,jpeg,png,gif,bmp",
-        "--page-requisites",
-        "--adjust-extension",
-        "--span-hosts",
-        "--no-check-certificate",
-        "--timestamping",
-        "--directory-prefix",
-        "/pfs/out",
-        "--input-file", "/pfs/urls/urls"
-    ],
-    "acceptReturnCode": [4,5,6,7,8]
-  },
-  "parallelism": "1",
-  "inputs": [
-    {
-      "repo": {
-        "name": "urls"
-      }
-    }
-  ]
-}
-`
-	require.Equal(t, true, strings.Contains(string(readme), inputPipelineManifest))
-
 	// create "urls" repo and check that it exists
 	cmd := exec.Command("pachctl", "create-repo", "urls")
 	require.NoError(t, cmd.Run())
-	var pfsRepos []*pfsclient.RepoInfo
-	pfsRepos, err = c.ListRepo([]string{})
+	pfsRepos, err := c.ListRepo([]string{})
 	require.NoError(t, err)
 	require.EqualOneOf(t, toRepoNames(pfsRepos), "urls")
 
@@ -423,13 +386,15 @@ func TestScraper(t *testing.T) {
 	require.NoError(t, exec.Command("pachctl", "finish-commit", "urls", "master/0").Run())
 	b := &bytes.Buffer{}
 	require.NoError(t, c.GetFile("urls", "master/0", "urls", 0, 0, "", false, &pfsclient.Shard{}, b))
+	require.Equal(t, "www.google.com\nwww.example.com\n", b.String())
 
 	// Create pipeline
 	cmd = exec.Command("pachctl", "create-pipeline", "-f", "-")
 	cmd.Stdin, err = os.Open("../../../doc/examples/scraper/scraper.json")
 	require.NoError(t, err)
 	require.NoError(t, cmd.Run())
-	c.FlushCommit([]*pfsclient.Commit{commitInfos[0].Commit}, nil) // Wait until the URLs have been scraped
+	_, err = c.FlushCommit([]*pfsclient.Commit{commitInfos[0].Commit}, nil) // Wait until the URLs have been scraped
+	require.NoError(t, err)
 
 	commitInfos, err = c.ListCommit(
 		// fromCommits (use only commits to the 'scraper' repo)
